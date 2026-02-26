@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vehicle } from './entities/vehicle.entity';
@@ -32,8 +32,21 @@ export class VehiclesService {
         type: v.sellerType,
         rating: v.sellerRating ? Number(v.sellerRating) : undefined,
       },
+      colour: v.colour,
+      engine: v.engine,
+      doors: v.doors,
+      seats: v.seats,
+      owners: v.owners,
+      keys: v.keys,
+      serviceHistory: v.serviceHistory,
+      consumption: v.consumption,
+      insuranceType: v.insuranceType,
+      annualCost: v.annualCost,
+      features: v.features,
       location: v.location,
       registrationDate: v.registrationDate,
+      isActive: v.isActive,
+      createdAt: v.createdAt,
       isFavorite: savedVehicleIds.includes(v.id),
     };
   }
@@ -128,6 +141,16 @@ export class VehiclesService {
     return vehicles.map((v) => this.toFrontendVehicle(v));
   }
 
+  async findByUserId(userId: string) {
+    const vehicles = await this.vehiclesRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+    return {
+      data: vehicles.map((v) => this.toFrontendVehicle(v)),
+    };
+  }
+
   async create(createData: any) {
     const vehicle = this.vehiclesRepository.create(createData);
     const saved = await this.vehiclesRepository.save(vehicle);
@@ -137,6 +160,18 @@ export class VehiclesService {
   async update(id: string, updateData: Partial<Vehicle>) {
     await this.vehiclesRepository.update(id, updateData);
     return this.findById(id);
+  }
+
+  async delete(id: string, userId: string) {
+    const vehicle = await this.vehiclesRepository.findOne({ where: { id } });
+    if (!vehicle) {
+      throw new NotFoundException('Vehicle not found');
+    }
+    if (vehicle.userId && vehicle.userId !== userId) {
+      throw new ForbiddenException('You are not allowed to delete this advert');
+    }
+    await this.vehiclesRepository.delete(id);
+    return { success: true };
   }
 
   async seed() {

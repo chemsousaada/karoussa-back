@@ -1,16 +1,26 @@
-import { Controller, Get, Post, Put, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Query, Param, UseGuards, Request } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { VehiclesService } from './vehicles.service';
+import { UsersService } from '../users/users.service';
 
 @Controller('api/mock')
 export class VehiclesController {
-  constructor(private vehiclesService: VehiclesService) {}
+  constructor(
+    private vehiclesService: VehiclesService,
+    private usersService: UsersService,
+  ) {}
 
   @Get('search')
   async search(@Query() filters: any) {
     const page = parseInt(filters.page) || 1;
     const limit = parseInt(filters.limit) || 20;
     return this.vehiclesService.findAll(filters, page, limit);
+  }
+
+  @Get('vehicles/my')
+  @UseGuards(JwtAuthGuard)
+  async getMyVehicles(@Request() req) {
+    return this.vehiclesService.findByUserId(req.user.userId);
   }
 
   @Get('vehicles/:id')
@@ -20,14 +30,31 @@ export class VehiclesController {
 
   @Post('vehicles')
   @UseGuards(JwtAuthGuard)
-  async createVehicle(@Body() body: any) {
-    return this.vehiclesService.create(body);
+  async createVehicle(@Request() req, @Body() body: any) {
+    const dbUser = await this.usersService.findById(req.user.userId);
+    const sellerName = dbUser.userType === 'store'
+      ? (dbUser.storeName || dbUser.name)
+      : dbUser.name;
+    const vehicleData = {
+      ...body,
+      userId: dbUser.id,
+      sellerId: dbUser.id,
+      sellerName: sellerName || dbUser.email,
+      sellerType: dbUser.userType === 'store' ? 'dealer' : 'private',
+    };
+    return this.vehiclesService.create(vehicleData);
   }
 
   @Put('vehicles/:id')
   @UseGuards(JwtAuthGuard)
   async updateVehicle(@Param('id') id: string, @Body() body: any) {
     return this.vehiclesService.update(id, body);
+  }
+
+  @Delete('vehicles/:id')
+  @UseGuards(JwtAuthGuard)
+  async deleteVehicle(@Request() req, @Param('id') id: string) {
+    return this.vehiclesService.delete(id, req.user.userId);
   }
 
   @Get('sellers/:id')

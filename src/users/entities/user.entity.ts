@@ -29,6 +29,51 @@ export class User {
   @Column({ nullable: true })
   avatar: string;
 
+  // User type: 'individual' or 'store'
+  @Column({ default: 'individual' })
+  userType: string;
+
+  // Personal info
+  @Column({ nullable: true })
+  firstName: string;
+
+  @Column({ nullable: true })
+  lastName: string;
+
+  @Column({ nullable: true })
+  city: string;
+
+  @Column({ nullable: true })
+  town: string;
+
+  // Store-specific fields
+  @Column({ nullable: true })
+  storeName: string;
+
+  @Column({ nullable: true })
+  storePhone1: string;
+
+  @Column({ nullable: true })
+  storePhone2: string;
+
+  @Column({ nullable: true })
+  storeEmail: string;
+
+  @Column({ nullable: true })
+  storeWebsite: string;
+
+  @Column({ nullable: true })
+  storeAddress: string;
+
+  @Column({ nullable: true })
+  storeCity: string;
+
+  @Column({ nullable: true })
+  storeTown: string;
+
+  @Column({ type: 'json', nullable: true })
+  openingHours: Record<string, any>;
+
   @Column({ nullable: true, default: 'free' })
   subscriptionPlan: string;
 

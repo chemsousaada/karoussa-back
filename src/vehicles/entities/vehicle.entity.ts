@@ -46,7 +46,22 @@ export class Vehicle {
   @Column({ nullable: true })
   image: string;
 
-  @Column({ type: 'simple-array', nullable: true })
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: {
+      to: (v: string[]) => (v && v.length ? JSON.stringify(v) : null),
+      from: (v: string) => {
+        if (!v) return [];
+        try {
+          return JSON.parse(v);
+        } catch {
+          // Legacy simple-array format: comma-separated URLs
+          return v.split(',').filter(Boolean);
+        }
+      },
+    },
+  })
   images: string[];
 
   @Column({ type: 'text', nullable: true })
@@ -66,10 +81,64 @@ export class Vehicle {
   sellerRating: number;
 
   @Column({ nullable: true })
+  colour: string;
+
+  @Column({ nullable: true })
+  engine: string; // e.g. '1.5L', '2.0L TDI'
+
+  @Column({ nullable: true })
+  doors: number;
+
+  @Column({ nullable: true })
+  seats: number;
+
+  // Vehicle history
+  @Column({ nullable: true })
+  owners: number; // number of previous owners
+
+  @Column({ nullable: true })
+  keys: string; // '1' | '2' | '3+' | 'Unknown'
+
+  @Column({ nullable: true })
+  serviceHistory: string; // 'Full' | 'Partial' | 'None' | 'Contact seller'
+
+  // Running costs
+  @Column({ nullable: true })
+  consumption: string; // e.g. '61.0 l/100km' or '48 MPG'
+
+  @Column({ nullable: true })
+  insuranceType: string; // e.g. 'Comprehensive'
+
+  @Column({ nullable: true })
+  annualCost: string; // e.g. '1200'
+
+  // Features / extras
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: {
+      to: (v: string[]) => (v && v.length ? JSON.stringify(v) : null),
+      from: (v: string) => {
+        if (!v) return [];
+        try {
+          return JSON.parse(v);
+        } catch {
+          return v.split(',').filter(Boolean);
+        }
+      },
+    },
+  })
+  features: string[];
+
+  @Column({ nullable: true })
   location: string;
 
   @Column({ nullable: true })
   registrationDate: string;
+
+  // The user who created this advert
+  @Column({ nullable: true })
+  userId: string;
 
   @Column({ default: true })
   isActive: boolean;
