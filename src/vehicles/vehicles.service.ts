@@ -46,6 +46,9 @@ export class VehiclesService {
       location: v.location,
       registrationDate: v.registrationDate,
       isActive: v.isActive,
+      status: v.status ?? 'active',
+      advertType: v.advertType ?? 'selling',
+      unavailableDates: v.unavailableDates ?? [],
       createdAt: v.createdAt,
       isFavorite: savedVehicleIds.includes(v.id),
     };

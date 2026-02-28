@@ -11,6 +11,7 @@ import { SavedModule } from './saved/saved.module';
 import { ArticlesModule } from './articles/articles.module';
 import { FaqsModule } from './faqs/faqs.module';
 import { ContactModule } from './contact/contact.module';
+import { ConversationsModule } from './conversations/conversations.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { ContactModule } from './contact/contact.module';
     ArticlesModule,
     FaqsModule,
     ContactModule,
+    ConversationsModule,
   ],
   controllers: [],
   providers: [],

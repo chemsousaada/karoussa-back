@@ -74,6 +74,28 @@ export class User {
   @Column({ type: 'json', nullable: true })
   openingHours: Record<string, any>;
 
+  // Rental Agency – multiple locations
+  @Column({ type: 'json', nullable: true })
+  agencyAddresses: { street: string; city: string; town: string }[];
+
+  // Rental Agency – rent process
+  @Column({ type: 'json', nullable: true })
+  rentConditions: string[];
+
+  @Column({ type: 'json', nullable: true })
+  acceptedDocuments: string[];
+
+  @Column({ type: 'json', nullable: true })
+  paymentMethods: string[];
+
+  /** Up to 3 profile photos – relative URLs like /uploads/profiles/... */
+  @Column({ type: 'json', nullable: true })
+  profilePhotos: string[];
+
+  /** About us text for stores and agencies */
+  @Column({ type: 'varchar', length: 5000, nullable: true })
+  about: string;
+
   @Column({ nullable: true, default: 'free' })
   subscriptionPlan: string;
 

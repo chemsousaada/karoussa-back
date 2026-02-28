@@ -64,6 +64,31 @@ export class VehiclesController {
       return { error: 'Seller not found', statusCode: 404 };
     }
     const first = vehicles[0];
+    let profilePhotos: string[] = [];
+    let about: string | null = null;
+    let storePhone1: string | null = null;
+    let storePhone2: string | null = null;
+    let storeWebsite: string | null = null;
+    let storeAddress: string | null = null;
+    let storeCity: string | null = null;
+    let storeTown: string | null = null;
+    let openingHours: Record<string, any> | null = null;
+    let agencyAddresses: { street: string; city: string; town: string }[] = [];
+    try {
+      const user = await this.usersService.findById(sellerId);
+      if (user) {
+        profilePhotos = user.profilePhotos ?? [];
+        about = user.about ?? null;
+        storePhone1 = user.storePhone1 ?? null;
+        storePhone2 = user.storePhone2 ?? null;
+        storeWebsite = user.storeWebsite ?? null;
+        storeAddress = user.storeAddress ?? null;
+        storeCity = user.storeCity ?? null;
+        storeTown = user.storeTown ?? null;
+        openingHours = user.openingHours ?? null;
+        agencyAddresses = user.agencyAddresses ?? [];
+      }
+    } catch {}
     return {
       seller: {
         id: first.seller.id,
@@ -71,6 +96,16 @@ export class VehiclesController {
         type: first.seller.type,
         rating: first.seller.rating,
         vehicleCount: vehicles.length,
+        profilePhotos,
+        about,
+        storePhone1,
+        storePhone2,
+        storeWebsite,
+        storeAddress,
+        storeCity,
+        storeTown,
+        openingHours,
+        agencyAddresses,
       },
       vehicles,
     };

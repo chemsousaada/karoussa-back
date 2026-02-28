@@ -136,12 +136,37 @@ export class Vehicle {
   @Column({ nullable: true })
   registrationDate: string;
 
+  // Rental-specific fields
+  @Column({ nullable: true, default: 'selling' })
+  advertType: string; // 'selling' | 'rental'
+
+  @Column({ nullable: true, default: false })
+  unlimitedMileage: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  priceDetails: string;
+
+  @Column({ nullable: true, default: false })
+  isPricePerDay: boolean;
+
+  @Column({ nullable: true, default: false })
+  possibleDropOff: boolean;
+
+  @Column({ type: 'json', nullable: true })
+  dropOffLocations: { addressIndex: number; active: boolean; pricePerDay: string }[];
+
+  @Column({ type: 'json', nullable: true })
+  unavailableDates: string[];
+
   // The user who created this advert
   @Column({ nullable: true })
   userId: string;
 
   @Column({ default: true })
   isActive: boolean;
+
+  @Column({ nullable: true, default: 'active' })
+  status: string; // 'active' | 'sold' | 'inactive'
 
   @CreateDateColumn()
   createdAt: Date;
