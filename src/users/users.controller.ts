@@ -1,6 +1,6 @@
 import {
-  Controller, Get, Put, Post, Delete, Body, Param,
-  UseGuards, UseInterceptors, UploadedFile, Request, BadRequestException,
+  Controller, Get, Put, Post, Delete, Patch, Body, Param, Query,
+  UseGuards, UseInterceptors, UploadedFile, Request, BadRequestException, ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -130,5 +130,86 @@ export class UsersController {
         newsletter: user.notifyNewsletter,
       },
     };
+  }
+
+  // ── Admin endpoints (require isAdmin = true) ─────────────────────────────────
+
+  private async requireAdmin(userId: string) {
+    const caller = await this.usersService.findById(userId);
+    if (!caller.isAdmin) throw new ForbiddenException('Admin access required');
+  }
+
+  @Get('admin')
+  @UseGuards(JwtAuthGuard)
+  async listUsers(@Request() req, @Query() query: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.findAllAdmin({
+      search: query.search,
+      type:   query.type,
+      plan:   query.plan,
+      page:   parseInt(query.page)  || 1,
+      limit:  parseInt(query.limit) || 20,
+    });
+  }
+
+  @Patch('admin/:id/status')
+  @UseGuards(JwtAuthGuard)
+  async toggleStatus(@Request() req, @Param('id') id: string, @Body() body: { isActive: boolean }) {
+    await this.requireAdmin(req.user.userId);
+    const user = await this.usersService.setActive(id, body.isActive);
+    const { password, ...safe } = user as any;
+    return safe;
+  }
+
+  @Put('admin/:id')
+  @UseGuards(JwtAuthGuard)
+  async updateUser(@Request() req, @Param('id') id: string, @Body() body: any) {
+    await this.requireAdmin(req.user.userId);
+    const user = await this.usersService.update(id, body);
+    const { password, ...safe } = user as any;
+    return safe;
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(JwtAuthGuard)
+  async deleteUser(@Request() req, @Param('id') id: string) {
+    await this.requireAdmin(req.user.userId);
+    if (id === req.user.userId) throw new ForbiddenException('Cannot delete yourself');
+    return this.usersService.deleteById(id);
+  }
+
+  @Post('admin/:id/notify')
+  @UseGuards(JwtAuthGuard)
+  async notifyUser(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() body: { types: string[]; subject: string; message: string },
+  ) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.notifyUser(id, body.types, body.subject, body.message);
+  }
+
+  @Post('admin/:id/ban')
+  @UseGuards(JwtAuthGuard)
+  async banUser(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() body: { reason: string; bannedUntil?: string },
+  ) {
+    await this.requireAdmin(req.user.userId);
+    if (id === req.user.userId) throw new ForbiddenException('Cannot ban yourself');
+    const bannedUntil = body.bannedUntil ? new Date(body.bannedUntil) : null;
+    const user = await this.usersService.banUser(id, body.reason, bannedUntil);
+    const { password, ...safe } = user as any;
+    return safe;
+  }
+
+  @Delete('admin/:id/ban')
+  @UseGuards(JwtAuthGuard)
+  async unbanUser(@Request() req, @Param('id') id: string) {
+    await this.requireAdmin(req.user.userId);
+    const user = await this.usersService.unbanUser(id);
+    const { password, ...safe } = user as any;
+    return safe;
   }
 }

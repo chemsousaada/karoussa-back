@@ -140,6 +140,9 @@ export class Vehicle {
   @Column({ nullable: true, default: 'selling' })
   advertType: string; // 'selling' | 'rental'
 
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  vehicleCategory: string; // e.g. 'new_car' | 'used_car' | 'new_utility' | ... | 'car' | 'utility' | 'machine'
+
   @Column({ nullable: true, default: false })
   unlimitedMileage: boolean;
 
@@ -167,6 +170,9 @@ export class Vehicle {
 
   @Column({ nullable: true, default: 'active' })
   status: string; // 'active' | 'sold' | 'inactive'
+
+  @Column({ default: 0 })
+  viewsCount: number;
 
   @CreateDateColumn()
   createdAt: Date;

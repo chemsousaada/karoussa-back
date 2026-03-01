@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
@@ -33,6 +33,34 @@ export class AuthService {
     const passwordMatch = await bcrypt.compare(loginDto.password, user.password);
     if (!passwordMatch) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Check ban status
+    if (user.isBanned) {
+      const now = new Date();
+      const isLifetime = user.bannedUntil === null || user.bannedUntil === undefined;
+      const isExpired = !isLifetime && new Date(user.bannedUntil) <= now;
+
+      if (isExpired) {
+        // Auto-unban: ban period has elapsed
+        await this.usersService.update(user.id, {
+          isBanned: false,
+          banReason: null,
+          bannedUntil: null,
+          bannedAt: null,
+        } as any);
+      } else {
+        throw new HttpException(
+          {
+            isBanned: true,
+            isLifetime,
+            banReason: user.banReason || 'No reason provided',
+            bannedUntil: user.bannedUntil ? new Date(user.bannedUntil).toISOString() : null,
+            bannedAt: user.bannedAt ? new Date(user.bannedAt).toISOString() : null,
+          },
+          HttpStatus.FORBIDDEN,
+        );
+      }
     }
 
     const token = this.jwtService.sign({ sub: user.id, email: user.email });

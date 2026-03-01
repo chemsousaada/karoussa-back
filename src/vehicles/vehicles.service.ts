@@ -2,12 +2,15 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vehicle } from './entities/vehicle.entity';
+import { VehicleView } from './entities/vehicle-view.entity';
 
 @Injectable()
 export class VehiclesService {
   constructor(
     @InjectRepository(Vehicle)
     private vehiclesRepository: Repository<Vehicle>,
+    @InjectRepository(VehicleView)
+    private vehicleViewsRepository: Repository<VehicleView>,
   ) {}
 
   private toFrontendVehicle(v: Vehicle, savedVehicleIds: string[] = []) {
@@ -48,9 +51,11 @@ export class VehiclesService {
       isActive: v.isActive,
       status: v.status ?? 'active',
       advertType: v.advertType ?? 'selling',
+      vehicleCategory: v.vehicleCategory ?? null,
       unavailableDates: v.unavailableDates ?? [],
       createdAt: v.createdAt,
       isFavorite: savedVehicleIds.includes(v.id),
+      viewsCount: v.viewsCount ?? 0,
     };
   }
 
@@ -163,6 +168,25 @@ export class VehiclesService {
   async update(id: string, updateData: Partial<Vehicle>) {
     await this.vehiclesRepository.update(id, updateData);
     return this.findById(id);
+  }
+
+  async recordView(vehicleId: string, userId: string): Promise<{ viewsCount: number }> {
+    const vehicle = await this.vehiclesRepository.findOne({ where: { id: vehicleId } });
+    if (!vehicle) throw new NotFoundException('Vehicle not found');
+
+    const existing = await this.vehicleViewsRepository.findOne({
+      where: { vehicleId, userId },
+    });
+
+    if (!existing) {
+      await this.vehicleViewsRepository.save(
+        this.vehicleViewsRepository.create({ vehicleId, userId }),
+      );
+      await this.vehiclesRepository.increment({ id: vehicleId }, 'viewsCount', 1);
+      vehicle.viewsCount = (vehicle.viewsCount ?? 0) + 1;
+    }
+
+    return { viewsCount: vehicle.viewsCount ?? 0 };
   }
 
   async delete(id: string, userId: string) {

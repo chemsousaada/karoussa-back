@@ -28,6 +28,12 @@ export class VehiclesController {
     return this.vehiclesService.findById(id);
   }
 
+  @Post('vehicles/:id/view')
+  @UseGuards(JwtAuthGuard)
+  async recordView(@Param('id') id: string, @Request() req) {
+    return this.vehiclesService.recordView(id, req.user.userId);
+  }
+
   @Post('vehicles')
   @UseGuards(JwtAuthGuard)
   async createVehicle(@Request() req, @Body() body: any) {

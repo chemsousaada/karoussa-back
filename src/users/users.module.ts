@@ -4,10 +4,11 @@ import { MulterModule } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { User } from './entities/user.entity';
+import { UserNotification } from './entities/user-notification.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, UserNotification]),
     MulterModule.register({ dest: './uploads/profiles' }),
   ],
   providers: [UsersService],

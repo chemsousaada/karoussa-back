@@ -115,6 +115,25 @@ export class User {
   @Column({ default: false })
   notifyNewsletter: boolean;
 
+  @Column({ default: false })
+  isAdmin: boolean;
+
+  @Column({ default: true })
+  isActive: boolean;
+
+  // Ban fields
+  @Column({ default: false })
+  isBanned: boolean;
+
+  @Column({ type: 'varchar', length: 1000, nullable: true })
+  banReason: string;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  bannedUntil: Date;   // null = lifetime ban
+
+  @Column({ type: 'timestamptz', nullable: true })
+  bannedAt: Date;
+
   @CreateDateColumn()
   createdAt: Date;
 
