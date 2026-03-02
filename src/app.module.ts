@@ -12,6 +12,7 @@ import { ArticlesModule } from './articles/articles.module';
 import { FaqsModule } from './faqs/faqs.module';
 import { ContactModule } from './contact/contact.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { PlansModule } from './plans/plans.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     FaqsModule,
     ContactModule,
     ConversationsModule,
+    PlansModule,
   ],
   controllers: [],
   providers: [],

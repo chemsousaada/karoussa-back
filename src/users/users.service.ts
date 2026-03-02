@@ -1,15 +1,21 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { User } from './entities/user.entity';
 import { UserNotification } from './entities/user-notification.entity';
+import { SubscriptionRequest } from './entities/subscription-request.entity';
+import { AdminInquiry, SelectedAdvert } from './entities/admin-inquiry.entity';
+import { InquiryMessage } from './entities/inquiry-message.entity';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User) private usersRepository: Repository<User>,
     @InjectRepository(UserNotification) private notificationsRepository: Repository<UserNotification>,
+    @InjectRepository(SubscriptionRequest) private subRequestsRepository: Repository<SubscriptionRequest>,
+    @InjectRepository(AdminInquiry) private inquiriesRepository: Repository<AdminInquiry>,
+    @InjectRepository(InquiryMessage) private inquiryMessagesRepository: Repository<InquiryMessage>,
   ) {}
 
   async create(registerData: {
@@ -178,6 +184,214 @@ export class UsersService {
     }
 
     return { sent };
+  }
+
+  // ── Subscription requests ─────────────────────────────────────────────────
+
+  async createSubscriptionRequest(userId: string, data: {
+    requestedPlan: string;
+    duration: number;
+    price: number;
+    promoCode?: string;
+    discountPct?: number;
+    paymentMethod: string;
+  }) {
+    const user = await this.findById(userId);
+    const request = this.subRequestsRepository.create({
+      userId,
+      userName: user.name,
+      userEmail: user.email,
+      currentPlan: user.subscriptionPlan || 'free',
+      requestedPlan: data.requestedPlan,
+      duration: data.duration,
+      price: data.price,
+      promoCode: data.promoCode ?? null,
+      discountPct: data.discountPct ?? 0,
+      paymentMethod: data.paymentMethod,
+      status: 'pending',
+    });
+    return this.subRequestsRepository.save(request);
+  }
+
+  async getMySubscriptionRequests(userId: string) {
+    return this.subRequestsRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getAllSubscriptionRequests(filters: { status?: string; page?: number; limit?: number }) {
+    const page  = Math.max(1, filters.page  ?? 1);
+    const limit = Math.min(50, filters.limit ?? 20);
+    const query = this.subRequestsRepository.createQueryBuilder('req')
+      .orderBy('req.createdAt', 'DESC');
+    if (filters.status && filters.status !== 'all') {
+      query.andWhere('req.status = :status', { status: filters.status });
+    }
+    const [data, total] = await query.skip((page - 1) * limit).take(limit).getManyAndCount();
+    return { data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+  }
+
+  async acceptSubscriptionRequest(requestId: string, options: {
+    duration?: number;
+    notifyMethods?: string[];
+    adminNote?: string;
+  }) {
+    const request = await this.subRequestsRepository.findOne({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Subscription request not found');
+
+    const finalDuration = options.duration ?? request.duration;
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + finalDuration);
+
+    await this.usersRepository.update(request.userId, {
+      subscriptionPlan: request.requestedPlan,
+      subscriptionExpiresAt: expiresAt.toISOString().split('T')[0],
+    });
+
+    const notifyMethods = options.notifyMethods ?? [];
+    await this.subRequestsRepository.update(requestId, {
+      status: 'accepted',
+      adjustedDuration: finalDuration,
+      notifyMethod: notifyMethods.join(',') || null,
+      adminNote: options.adminNote ?? null,
+    });
+
+    if (notifyMethods.length > 0) {
+      const planLabel = request.requestedPlan.charAt(0).toUpperCase() + request.requestedPlan.slice(1).replace('_', ' ');
+      const msg = options.adminNote
+        ? `Your ${planLabel} subscription has been approved for ${finalDuration} month(s). ${options.adminNote}`
+        : `Your ${planLabel} subscription has been approved and is now active for ${finalDuration} month(s).`;
+      await this.notifyUser(request.userId, notifyMethods, 'Subscription Approved ✓', msg);
+    }
+
+    return this.subRequestsRepository.findOne({ where: { id: requestId } });
+  }
+
+  async denySubscriptionRequest(requestId: string, options: {
+    notifyMethods?: string[];
+    adminNote?: string;
+  }) {
+    const request = await this.subRequestsRepository.findOne({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Subscription request not found');
+
+    const notifyMethods = options.notifyMethods ?? [];
+    await this.subRequestsRepository.update(requestId, {
+      status: 'denied',
+      notifyMethod: notifyMethods.join(',') || null,
+      adminNote: options.adminNote ?? null,
+    });
+
+    if (notifyMethods.length > 0) {
+      const planLabel = request.requestedPlan.charAt(0).toUpperCase() + request.requestedPlan.slice(1).replace('_', ' ');
+      const msg = options.adminNote
+        ? `Your subscription request for the ${planLabel} plan has been denied. Reason: ${options.adminNote}`
+        : `Your subscription request for the ${planLabel} plan was not approved at this time.`;
+      await this.notifyUser(request.userId, notifyMethods, 'Subscription Request Update', msg);
+    }
+
+    return this.subRequestsRepository.findOne({ where: { id: requestId } });
+  }
+
+  // ── Admin Inquiries ───────────────────────────────────────────────────────
+
+  async createInquiry(userId: string, data: {
+    requestedPlan: string;
+    selectedAdverts: SelectedAdvert[];
+    message: string;
+  }) {
+    const user = await this.findById(userId);
+    const inquiry = this.inquiriesRepository.create({
+      userId,
+      userName: user.name,
+      userEmail: user.email,
+      requestedPlan: data.requestedPlan,
+      selectedAdverts: data.selectedAdverts,
+      message: data.message,
+      status: 'pending',
+    });
+    const saved = await this.inquiriesRepository.save(inquiry);
+    // Auto-create the initial user message in the chat thread
+    await this.inquiryMessagesRepository.save(
+      this.inquiryMessagesRepository.create({
+        inquiryId: saved.id,
+        senderType: 'user',
+        content: data.message,
+      }),
+    );
+    return saved;
+  }
+
+  async getMyInquiries(userId: string) {
+    return this.inquiriesRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getInquiryMessages(userId: string, inquiryId: string) {
+    const inquiry = await this.inquiriesRepository.findOne({ where: { id: inquiryId } });
+    if (!inquiry) throw new NotFoundException('Inquiry not found');
+    if (inquiry.userId !== userId) throw new ForbiddenException('Access denied');
+    return this.inquiryMessagesRepository.find({
+      where: { inquiryId },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  async addUserMessage(userId: string, inquiryId: string, content: string) {
+    const inquiry = await this.inquiriesRepository.findOne({ where: { id: inquiryId } });
+    if (!inquiry) throw new NotFoundException('Inquiry not found');
+    if (inquiry.userId !== userId) throw new ForbiddenException('Access denied');
+    if (inquiry.status === 'resolved') throw new ForbiddenException('This conversation is resolved and closed');
+    return this.inquiryMessagesRepository.save(
+      this.inquiryMessagesRepository.create({ inquiryId, senderType: 'user', content }),
+    );
+  }
+
+  async adminListInquiries(filters: { status?: string; page?: number; limit?: number }) {
+    const page  = Math.max(1, filters.page  ?? 1);
+    const limit = Math.min(50, filters.limit ?? 20);
+    const query = this.inquiriesRepository.createQueryBuilder('inq')
+      .orderBy('inq.updatedAt', 'DESC');
+    if (filters.status && filters.status !== 'all') {
+      query.andWhere('inq.status = :status', { status: filters.status });
+    }
+    const [data, total] = await query.skip((page - 1) * limit).take(limit).getManyAndCount();
+    return { data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+  }
+
+  async adminGetInquiryMessages(inquiryId: string) {
+    const inquiry = await this.inquiriesRepository.findOne({ where: { id: inquiryId } });
+    if (!inquiry) throw new NotFoundException('Inquiry not found');
+    return this.inquiryMessagesRepository.find({
+      where: { inquiryId },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  async adminReplyToInquiry(inquiryId: string, content: string) {
+    const inquiry = await this.inquiriesRepository.findOne({ where: { id: inquiryId } });
+    if (!inquiry) throw new NotFoundException('Inquiry not found');
+    if (inquiry.status === 'resolved') throw new ForbiddenException('Inquiry is resolved');
+    // Open the chat if it was still pending
+    if (inquiry.status === 'pending') {
+      await this.inquiriesRepository.update(inquiryId, { status: 'open' });
+    }
+    const msg = await this.inquiryMessagesRepository.save(
+      this.inquiryMessagesRepository.create({ inquiryId, senderType: 'admin', content }),
+    );
+    return { message: msg, inquiry: await this.inquiriesRepository.findOne({ where: { id: inquiryId } }) };
+  }
+
+  async adminResolveInquiry(inquiryId: string) {
+    await this.inquiriesRepository.update(inquiryId, { status: 'resolved' });
+    return this.inquiriesRepository.findOne({ where: { id: inquiryId } });
+  }
+
+  async adminReopenInquiry(inquiryId: string) {
+    await this.inquiriesRepository.update(inquiryId, { status: 'open' });
+    return this.inquiriesRepository.findOne({ where: { id: inquiryId } });
   }
 
   async seed() {

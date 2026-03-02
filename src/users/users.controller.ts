@@ -132,6 +132,132 @@ export class UsersController {
     };
   }
 
+  // ── Subscription requests (user) ──────────────────────────────────────────
+
+  @Post('me/subscription-requests')
+  @UseGuards(JwtAuthGuard)
+  async createSubRequest(@Request() req, @Body() body: any) {
+    return this.usersService.createSubscriptionRequest(req.user.userId, {
+      requestedPlan: body.requestedPlan,
+      duration:      body.duration,
+      price:         body.price,
+      promoCode:     body.promoCode,
+      discountPct:   body.discountPct,
+      paymentMethod: body.paymentMethod,
+    });
+  }
+
+  @Get('me/subscription-requests')
+  @UseGuards(JwtAuthGuard)
+  async getMySubRequests(@Request() req) {
+    return this.usersService.getMySubscriptionRequests(req.user.userId);
+  }
+
+  // ── Subscription requests (admin) ─────────────────────────────────────────
+
+  @Get('admin/subscription-requests')
+  @UseGuards(JwtAuthGuard)
+  async listSubRequests(@Request() req, @Query() query: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.getAllSubscriptionRequests({
+      status: query.status,
+      page:   parseInt(query.page)  || 1,
+      limit:  parseInt(query.limit) || 20,
+    });
+  }
+
+  @Put('admin/subscription-requests/:id/accept')
+  @UseGuards(JwtAuthGuard)
+  async acceptSubRequest(@Request() req, @Param('id') id: string, @Body() body: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.acceptSubscriptionRequest(id, {
+      duration:      body.duration ? parseInt(body.duration) : undefined,
+      notifyMethods: Array.isArray(body.notifyMethods) ? body.notifyMethods : (body.notifyMethod ? [body.notifyMethod] : []),
+      adminNote:     body.adminNote,
+    });
+  }
+
+  @Put('admin/subscription-requests/:id/deny')
+  @UseGuards(JwtAuthGuard)
+  async denySubRequest(@Request() req, @Param('id') id: string, @Body() body: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.denySubscriptionRequest(id, {
+      notifyMethods: Array.isArray(body.notifyMethods) ? body.notifyMethods : (body.notifyMethod ? [body.notifyMethod] : []),
+      adminNote:     body.adminNote,
+    });
+  }
+
+  // ── Inquiries (user) ──────────────────────────────────────────────────────
+
+  @Post('me/inquiries')
+  @UseGuards(JwtAuthGuard)
+  async createInquiry(@Request() req, @Body() body: any) {
+    return this.usersService.createInquiry(req.user.userId, {
+      requestedPlan:   body.requestedPlan,
+      selectedAdverts: body.selectedAdverts ?? [],
+      message:         body.message,
+    });
+  }
+
+  @Get('me/inquiries')
+  @UseGuards(JwtAuthGuard)
+  async getMyInquiries(@Request() req) {
+    return this.usersService.getMyInquiries(req.user.userId);
+  }
+
+  @Get('me/inquiries/:id/messages')
+  @UseGuards(JwtAuthGuard)
+  async getInquiryMessages(@Request() req, @Param('id') id: string) {
+    return this.usersService.getInquiryMessages(req.user.userId, id);
+  }
+
+  @Post('me/inquiries/:id/messages')
+  @UseGuards(JwtAuthGuard)
+  async addUserMessage(@Request() req, @Param('id') id: string, @Body() body: any) {
+    return this.usersService.addUserMessage(req.user.userId, id, body.content);
+  }
+
+  // ── Inquiries (admin) ─────────────────────────────────────────────────────
+
+  @Get('admin/inquiries')
+  @UseGuards(JwtAuthGuard)
+  async adminListInquiries(@Request() req, @Query() query: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.adminListInquiries({
+      status: query.status,
+      page:   parseInt(query.page)  || 1,
+      limit:  parseInt(query.limit) || 20,
+    });
+  }
+
+  @Get('admin/inquiries/:id/messages')
+  @UseGuards(JwtAuthGuard)
+  async adminGetInquiryMessages(@Request() req, @Param('id') id: string) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.adminGetInquiryMessages(id);
+  }
+
+  @Post('admin/inquiries/:id/reply')
+  @UseGuards(JwtAuthGuard)
+  async adminReply(@Request() req, @Param('id') id: string, @Body() body: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.adminReplyToInquiry(id, body.content);
+  }
+
+  @Put('admin/inquiries/:id/resolve')
+  @UseGuards(JwtAuthGuard)
+  async adminResolve(@Request() req, @Param('id') id: string) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.adminResolveInquiry(id);
+  }
+
+  @Put('admin/inquiries/:id/reopen')
+  @UseGuards(JwtAuthGuard)
+  async adminReopen(@Request() req, @Param('id') id: string) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.adminReopenInquiry(id);
+  }
+
   // ── Admin endpoints (require isAdmin = true) ─────────────────────────────────
 
   private async requireAdmin(userId: string) {
