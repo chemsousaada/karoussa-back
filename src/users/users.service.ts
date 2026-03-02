@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { User } from './entities/user.entity';
 import { UserNotification } from './entities/user-notification.entity';
+import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import { SubscriptionRequest } from './entities/subscription-request.entity';
 import { AdminInquiry, SelectedAdvert } from './entities/admin-inquiry.entity';
 import { InquiryMessage } from './entities/inquiry-message.entity';
@@ -13,6 +14,7 @@ export class UsersService {
   constructor(
     @InjectRepository(User) private usersRepository: Repository<User>,
     @InjectRepository(UserNotification) private notificationsRepository: Repository<UserNotification>,
+    @InjectRepository(ScheduledNotification) private scheduledNotifRepository: Repository<ScheduledNotification>,
     @InjectRepository(SubscriptionRequest) private subRequestsRepository: Repository<SubscriptionRequest>,
     @InjectRepository(AdminInquiry) private inquiriesRepository: Repository<AdminInquiry>,
     @InjectRepository(InquiryMessage) private inquiryMessagesRepository: Repository<InquiryMessage>,
@@ -158,6 +160,7 @@ export class UsersService {
     types: string[],
     subject: string,
     message: string,
+    link?: string,
   ) {
     const user = await this.findById(userId);
     const sent: string[] = [];
@@ -177,13 +180,105 @@ export class UsersService {
         sent.push('sms');
       } else if (type === 'notification') {
         await this.notificationsRepository.save(
-          this.notificationsRepository.create({ userId, type: 'notification', subject, message }),
+          this.notificationsRepository.create({ userId, type: 'notification', subject, message, link: link ?? null }),
         );
         sent.push('notification');
       }
     }
 
     return { sent };
+  }
+
+  /** Create a notification directly (internal use - skips email/sms) */
+  async createNotification(userId: string, subject: string, message: string, link?: string) {
+    return this.notificationsRepository.save(
+      this.notificationsRepository.create({ userId, type: 'notification', subject, message, link: link ?? null }),
+    );
+  }
+
+  /** Broadcast a notification to all users or a specific list. Supports scheduling. */
+  async broadcastNotification(data: {
+    targetType: 'all' | 'specific';
+    userIds?: string[];
+    subject: string;
+    message: string;
+    link?: string;
+    notifType?: string;
+    scheduledFor?: Date;
+  }) {
+    const scheduledFor = data.scheduledFor ?? new Date();
+    const isImmediate = scheduledFor <= new Date();
+
+    if (isImmediate) {
+      let userIds = data.userIds ?? [];
+      if (data.targetType === 'all') {
+        const users = await this.usersRepository.find({ select: ['id'] });
+        userIds = users.map(u => u.id);
+      }
+      const notifs = userIds.map(uid =>
+        this.notificationsRepository.create({
+          userId: uid,
+          type: 'notification',
+          subject: data.subject,
+          message: data.message,
+          link: data.link ?? null,
+        }),
+      );
+      if (notifs.length > 0) await this.notificationsRepository.save(notifs);
+      return { sent: notifs.length, scheduled: false };
+    }
+
+    // Store for later processing by cron
+    const scheduled = await this.scheduledNotifRepository.save(
+      this.scheduledNotifRepository.create({
+        userIds: data.targetType === 'all' ? null : (data.userIds ?? []),
+        subject: data.subject,
+        message: data.message,
+        link: data.link ?? null,
+        notifType: data.notifType ?? null,
+        scheduledFor,
+        status: 'pending',
+      }),
+    );
+    return { sent: 0, scheduled: true, id: scheduled.id };
+  }
+
+  /** Process pending scheduled notifications (called by cron). */
+  async processPendingScheduled() {
+    const pending = await this.scheduledNotifRepository.find({
+      where: { status: 'pending' },
+    });
+    const now = new Date();
+    for (const sn of pending) {
+      if (sn.scheduledFor > now) continue;
+
+      let userIds = sn.userIds ?? [];
+      if (sn.userIds === null) {
+        const users = await this.usersRepository.find({ select: ['id'] });
+        userIds = users.map(u => u.id);
+      }
+      const notifs = userIds.map(uid =>
+        this.notificationsRepository.create({
+          userId: uid,
+          type: 'notification',
+          subject: sn.subject,
+          message: sn.message,
+          link: sn.link ?? null,
+        }),
+      );
+      if (notifs.length > 0) await this.notificationsRepository.save(notifs);
+      await this.scheduledNotifRepository.update(sn.id, { status: 'sent' });
+    }
+  }
+
+  /** List scheduled notifications (admin view). */
+  async listScheduledNotifications(page = 1, limit = 20) {
+    const [data, total] = await this.scheduledNotifRepository.findAndCount({
+      order: { scheduledFor: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return { data, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
   // ── Subscription requests ─────────────────────────────────────────────────
@@ -262,7 +357,7 @@ export class UsersService {
       const msg = options.adminNote
         ? `Your ${planLabel} subscription has been approved for ${finalDuration} month(s). ${options.adminNote}`
         : `Your ${planLabel} subscription has been approved and is now active for ${finalDuration} month(s).`;
-      await this.notifyUser(request.userId, notifyMethods, 'Subscription Approved ✓', msg);
+      await this.notifyUser(request.userId, notifyMethods, 'Subscription Approved ✓', msg, '/account/subscriptions');
     }
 
     return this.subRequestsRepository.findOne({ where: { id: requestId } });
@@ -287,7 +382,7 @@ export class UsersService {
       const msg = options.adminNote
         ? `Your subscription request for the ${planLabel} plan has been denied. Reason: ${options.adminNote}`
         : `Your subscription request for the ${planLabel} plan was not approved at this time.`;
-      await this.notifyUser(request.userId, notifyMethods, 'Subscription Request Update', msg);
+      await this.notifyUser(request.userId, notifyMethods, 'Subscription Request Update', msg, '/account/subscriptions');
     }
 
     return this.subRequestsRepository.findOne({ where: { id: requestId } });
@@ -381,6 +476,13 @@ export class UsersService {
     const msg = await this.inquiryMessagesRepository.save(
       this.inquiryMessagesRepository.create({ inquiryId, senderType: 'admin', content }),
     );
+    // Notify the user about the new admin reply (Step 3)
+    await this.createNotification(
+      inquiry.userId,
+      'New message from support',
+      `Support has replied to your inquiry. "${content.slice(0, 80)}${content.length > 80 ? '…' : ''}"`,
+      `/account/support`,
+    ).catch(() => {});
     return { message: msg, inquiry: await this.inquiriesRepository.findOne({ where: { id: inquiryId } }) };
   }
 
@@ -392,6 +494,40 @@ export class UsersService {
   async adminReopenInquiry(inquiryId: string) {
     await this.inquiriesRepository.update(inquiryId, { status: 'open' });
     return this.inquiriesRepository.findOne({ where: { id: inquiryId } });
+  }
+
+  // ── Notifications (user-facing) ───────────────────────────────────────────
+
+  async getUserNotifications(userId: string, page = 1, limit = 20, unreadOnly = false) {
+    const where: any = { userId };
+    if (unreadOnly) where.isRead = false;
+    const [data, total] = await this.notificationsRepository.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return { data, total, page, limit, pages: Math.ceil(total / limit) };
+  }
+
+  async getUnreadNotificationCount(userId: string) {
+    const count = await this.notificationsRepository.count({ where: { userId, isRead: false } });
+    return { count };
+  }
+
+  async markNotificationRead(userId: string, id: string) {
+    await this.notificationsRepository.update({ id, userId }, { isRead: true });
+    return { success: true };
+  }
+
+  async markAllNotificationsRead(userId: string) {
+    await this.notificationsRepository.update({ userId, isRead: false }, { isRead: true });
+    return { success: true };
+  }
+
+  async deleteNotification(userId: string, id: string) {
+    await this.notificationsRepository.delete({ id, userId });
+    return { success: true };
   }
 
   async seed() {
@@ -409,8 +545,23 @@ export class UsersService {
         notifyMessages: true,
         notifyNewsletter: false,
       });
-      await this.usersRepository.save(user);
+      const saved = await this.usersRepository.save(user);
       console.log('✅ Test user seeded: test@example.com / password123');
+
+      // Seed demo notifications for the test user
+      const demoNotifs = [
+        { subject: 'Welcome to Autotrader!', message: 'Your account is ready. Start by creating your first advert or browsing thousands of vehicles.', isRead: true },
+        { subject: 'Subscription Plan Updated', message: 'Your subscription request for the Premium plan has been approved. Your plan is now active for 30 days.', isRead: true },
+        { subject: 'New message received', message: 'You have a new message from a buyer regarding your BMW 3 Series listing. Tap to view the conversation.', isRead: false },
+        { subject: 'Your advert is live', message: 'Your advert for the 2021 Volkswagen Golf has been published and is now visible to buyers.', isRead: false },
+        { subject: 'Price drop alert', message: 'A vehicle on your saved list (Audi A4) has dropped in price by £1,500. Check it out before it sells!', isRead: false },
+      ];
+      for (const n of demoNotifs) {
+        await this.notificationsRepository.save(
+          this.notificationsRepository.create({ userId: saved.id, type: 'notification', ...n }),
+        );
+      }
+      console.log('✅ Demo notifications seeded');
     }
 
     // Always ensure admin user exists

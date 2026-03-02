@@ -174,6 +174,10 @@ export class Vehicle {
   @Column({ default: 0 })
   viewsCount: number;
 
+  // Sponsorship / featured promotion
+  @Column({ type: 'timestamp', nullable: true })
+  featuredUntil: Date;
+
   @CreateDateColumn()
   createdAt: Date;
 

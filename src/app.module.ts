@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -13,6 +14,7 @@ import { FaqsModule } from './faqs/faqs.module';
 import { ContactModule } from './contact/contact.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { PlansModule } from './plans/plans.module';
+import { ScheduledTasksModule } from './scheduled-tasks/scheduled-tasks.module';
 
 @Module({
   imports: [
@@ -41,6 +43,7 @@ import { PlansModule } from './plans/plans.module';
       secret: process.env.JWT_SECRET || 'dev-secret-key',
       signOptions: { expiresIn: '24h' },
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     UsersModule,
     VehiclesModule,
@@ -50,6 +53,7 @@ import { PlansModule } from './plans/plans.module';
     ContactModule,
     ConversationsModule,
     PlansModule,
+    ScheduledTasksModule,
   ],
   controllers: [],
   providers: [],

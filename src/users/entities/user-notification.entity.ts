@@ -20,6 +20,9 @@ export class UserNotification {
   @Column({ default: false })
   isRead: boolean;
 
+  @Column({ nullable: true })
+  link: string;
+
   @CreateDateColumn()
   createdAt: Date;
 }

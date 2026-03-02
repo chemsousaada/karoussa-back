@@ -1,11 +1,12 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Req,
-  UseGuards, UseInterceptors, UploadedFiles,
+  Controller, Get, Post, Patch, Param, Body, Req, Query,
+  UseGuards, UseInterceptors, UploadedFiles, ForbiddenException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { ConversationsService } from './conversations.service';
+import { UsersService } from '../users/users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 const storage = diskStorage({
@@ -19,7 +20,15 @@ const storage = diskStorage({
 @Controller('api/mock/conversations')
 @UseGuards(JwtAuthGuard)
 export class ConversationsController {
-  constructor(private readonly svc: ConversationsService) {}
+  constructor(
+    private readonly svc: ConversationsService,
+    private readonly usersService: UsersService,
+  ) {}
+
+  private async requireAdmin(userId: string) {
+    const user = await this.usersService.findById(userId);
+    if (!user.isAdmin) throw new ForbiddenException('Admin access required');
+  }
 
   /** GET /api/mock/conversations – list current user's conversations */
   @Get()
@@ -102,5 +111,28 @@ export class ConversationsController {
     @Req() req: any,
   ) {
     return this.svc.createReport(id, req.user.userId, body.reason, body.details ?? '');
+  }
+
+  // ── Admin ─────────────────────────────────────────────────────────────────
+
+  /** GET /api/mock/conversations/admin/reports — list all reports with chat threads */
+  @Get('admin/reports')
+  async adminReports(@Req() req: any, @Query() query: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.svc.adminGetReports(
+      parseInt(query.page)  || 1,
+      parseInt(query.limit) || 20,
+    );
+  }
+
+  /** PATCH /api/mock/conversations/admin/reports/:id/status — update report status */
+  @Patch('admin/reports/:id/status')
+  async adminUpdateReportStatus(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { status: string },
+  ) {
+    await this.requireAdmin(req.user.userId);
+    return this.svc.adminUpdateReportStatus(id, body.status);
   }
 }

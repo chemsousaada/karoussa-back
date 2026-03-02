@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vehicle } from './entities/vehicle.entity';
 import { VehicleView } from './entities/vehicle-view.entity';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class VehiclesService {
@@ -11,6 +12,7 @@ export class VehiclesService {
     private vehiclesRepository: Repository<Vehicle>,
     @InjectRepository(VehicleView)
     private vehicleViewsRepository: Repository<VehicleView>,
+    private usersService: UsersService,
   ) {}
 
   private toFrontendVehicle(v: Vehicle, savedVehicleIds: string[] = []) {
@@ -56,6 +58,7 @@ export class VehiclesService {
       createdAt: v.createdAt,
       isFavorite: savedVehicleIds.includes(v.id),
       viewsCount: v.viewsCount ?? 0,
+      featuredUntil: v.featuredUntil ?? null,
     };
   }
 
@@ -183,10 +186,42 @@ export class VehiclesService {
         this.vehicleViewsRepository.create({ vehicleId, userId }),
       );
       await this.vehiclesRepository.increment({ id: vehicleId }, 'viewsCount', 1);
-      vehicle.viewsCount = (vehicle.viewsCount ?? 0) + 1;
+      const prevCount = vehicle.viewsCount ?? 0;
+      vehicle.viewsCount = prevCount + 1;
+
+      // Step 4: Notify advert owner when their listing reaches 100 views
+      if (prevCount < 100 && vehicle.viewsCount >= 100 && vehicle.userId) {
+        await this.usersService.createNotification(
+          vehicle.userId,
+          'Your advert reached 100 views! 🎉',
+          `Your listing "${vehicle.make} ${vehicle.model} (${vehicle.year})" has just reached 100 views. Great visibility!`,
+          `/vehicle/${vehicle.id}`,
+        ).catch(() => {});
+      }
     }
 
     return { viewsCount: vehicle.viewsCount ?? 0 };
+  }
+
+  /** Step 5: Check for expired sponsorships and notify owners (called by cron). */
+  async checkSponsorshipExpiry() {
+    const now = new Date();
+    const expired = await this.vehiclesRepository
+      .createQueryBuilder('v')
+      .where('v.featuredUntil IS NOT NULL')
+      .andWhere('v.featuredUntil <= :now', { now })
+      .andWhere('v.userId IS NOT NULL')
+      .getMany();
+
+    for (const v of expired) {
+      await this.vehiclesRepository.update(v.id, { featuredUntil: null });
+      await this.usersService.createNotification(
+        v.userId,
+        'Sponsorship ended for your advert',
+        `The sponsored promotion for "${v.make} ${v.model} (${v.year})" has ended. Renew it to stay at the top of search results.`,
+        `/vehicle/${v.id}`,
+      ).catch(() => {});
+    }
   }
 
   async delete(id: string, userId: string) {

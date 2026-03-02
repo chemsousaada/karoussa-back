@@ -9,6 +9,7 @@ import { Message } from './entities/message.entity';
 import { Report } from './entities/report.entity';
 import { User } from '../users/entities/user.entity';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class ConversationsService implements OnModuleInit {
@@ -18,6 +19,7 @@ export class ConversationsService implements OnModuleInit {
     @InjectRepository(Report) private reportRepo: Repository<Report>,
     @InjectRepository(User) private userRepo: Repository<User>,
     @InjectRepository(Vehicle) private vehicleRepo: Repository<Vehicle>,
+    private usersService: UsersService,
   ) {}
 
   async onModuleInit() {
@@ -77,7 +79,12 @@ export class ConversationsService implements OnModuleInit {
   ) {
     const conv = await this.convRepo.findOne({ where: { id: conversationId } });
     if (!conv) throw new NotFoundException('Conversation not found');
-    if (conv.userId !== senderId) throw new ForbiddenException('Access denied');
+
+    // Allow the buyer (conv.userId) or the vehicle owner (vehicle.userId) to send messages
+    const vehicle = await this.vehicleRepo.findOne({ where: { id: conv.vehicleId } });
+    const isBuyer = conv.userId === senderId;
+    const isSeller = vehicle?.userId === senderId;
+    if (!isBuyer && !isSeller) throw new ForbiddenException('Access denied');
 
     const msg = this.msgRepo.create({
       conversationId,
@@ -87,6 +94,19 @@ export class ConversationsService implements OnModuleInit {
     });
     const saved = await this.msgRepo.save(msg);
     await this.convRepo.update(conversationId, { updatedAt: new Date() });
+
+    // Notify the other party (Step 1)
+    const recipientId = isBuyer ? vehicle?.userId : conv.userId;
+    if (recipientId && recipientId !== senderId) {
+      const snippet = text ? `"${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"` : 'Sent an attachment.';
+      await this.usersService.createNotification(
+        recipientId,
+        'New message received',
+        `New message about ${conv.vehicleTitle}: ${snippet}`,
+        `/account/messages/${conv.id}`,
+      ).catch(() => {});
+    }
+
     return saved;
   }
 
@@ -177,6 +197,68 @@ export class ConversationsService implements OnModuleInit {
       createdAt: conv.createdAt,
       updatedAt: conv.updatedAt,
     };
+  }
+
+  // ── Admin ─────────────────────────────────────────────────────────────────
+
+  /** List all conversation reports with full chat thread (admin). */
+  async adminGetReports(page = 1, limit = 20) {
+    const [reports, total] = await this.reportRepo.findAndCount({
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    const enriched = await Promise.all(reports.map(async r => {
+      const conv = await this.convRepo.findOne({
+        where: { id: r.conversationId },
+        relations: ['messages'],
+      });
+      const reporter = await this.userRepo.findOne({
+        where: { id: r.reporterId },
+        select: ['id', 'name', 'email'],
+      });
+
+      const messages = conv
+        ? (conv.messages ?? [])
+            .slice()
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+            .map(m => ({
+              id: m.id,
+              senderId: m.senderId,
+              text: m.text,
+              attachments: m.attachments ?? [],
+              createdAt: m.createdAt,
+            }))
+        : [];
+
+      return {
+        id: r.id,
+        conversationId: r.conversationId,
+        reason: r.reason,
+        details: r.details,
+        status: r.status,
+        createdAt: r.createdAt,
+        reporter: reporter ? { id: reporter.id, name: reporter.name, email: reporter.email } : null,
+        conversation: conv
+          ? {
+              vehicleTitle: conv.vehicleTitle,
+              vehicleImage: conv.vehicleImage,
+              sellerName: conv.sellerName,
+              buyerUserId: conv.userId,
+              messages,
+            }
+          : null,
+      };
+    }));
+
+    return { data: enriched, total, page, limit, pages: Math.ceil(total / limit) };
+  }
+
+  /** Update report status (admin). */
+  async adminUpdateReportStatus(id: string, status: string) {
+    await this.reportRepo.update({ id }, { status });
+    return this.reportRepo.findOne({ where: { id } });
   }
 
   // ── Seed ──────────────────────────────────────────────────────────────────

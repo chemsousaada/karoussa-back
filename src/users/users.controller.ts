@@ -258,6 +258,43 @@ export class UsersController {
     return this.usersService.adminReopenInquiry(id);
   }
 
+  // ── Notifications (user) ──────────────────────────────────────────────────
+
+  @Get('me/notifications')
+  @UseGuards(JwtAuthGuard)
+  async getNotifications(@Request() req, @Query() query: any) {
+    return this.usersService.getUserNotifications(
+      req.user.userId,
+      parseInt(query.page) || 1,
+      parseInt(query.limit) || 20,
+      query.unread === 'true',
+    );
+  }
+
+  @Get('me/notifications/unread-count')
+  @UseGuards(JwtAuthGuard)
+  async getNotificationCount(@Request() req) {
+    return this.usersService.getUnreadNotificationCount(req.user.userId);
+  }
+
+  @Patch('me/notifications/read-all')
+  @UseGuards(JwtAuthGuard)
+  async markAllNotificationsRead(@Request() req) {
+    return this.usersService.markAllNotificationsRead(req.user.userId);
+  }
+
+  @Patch('me/notifications/:id/read')
+  @UseGuards(JwtAuthGuard)
+  async markNotificationRead(@Request() req, @Param('id') id: string) {
+    return this.usersService.markNotificationRead(req.user.userId, id);
+  }
+
+  @Delete('me/notifications/:id')
+  @UseGuards(JwtAuthGuard)
+  async deleteNotification(@Request() req, @Param('id') id: string) {
+    return this.usersService.deleteNotification(req.user.userId, id);
+  }
+
   // ── Admin endpoints (require isAdmin = true) ─────────────────────────────────
 
   private async requireAdmin(userId: string) {
@@ -309,10 +346,48 @@ export class UsersController {
   async notifyUser(
     @Request() req,
     @Param('id') id: string,
-    @Body() body: { types: string[]; subject: string; message: string },
+    @Body() body: { types: string[]; subject: string; message: string; link?: string },
   ) {
     await this.requireAdmin(req.user.userId);
-    return this.usersService.notifyUser(id, body.types, body.subject, body.message);
+    return this.usersService.notifyUser(id, body.types, body.subject, body.message, body.link);
+  }
+
+  /** POST /api/mock/users/admin/notifications/broadcast — send to all or specific users */
+  @Post('admin/notifications/broadcast')
+  @UseGuards(JwtAuthGuard)
+  async broadcastNotification(
+    @Request() req,
+    @Body() body: {
+      targetType: 'all' | 'specific';
+      userIds?: string[];
+      subject: string;
+      message: string;
+      link?: string;
+      notifType?: string;
+      scheduledFor?: string;
+    },
+  ) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.broadcastNotification({
+      targetType: body.targetType,
+      userIds:    body.userIds,
+      subject:    body.subject,
+      message:    body.message,
+      link:       body.link,
+      notifType:  body.notifType,
+      scheduledFor: body.scheduledFor ? new Date(body.scheduledFor) : undefined,
+    });
+  }
+
+  /** GET /api/mock/users/admin/notifications/scheduled — list scheduled notifications */
+  @Get('admin/notifications/scheduled')
+  @UseGuards(JwtAuthGuard)
+  async listScheduled(@Request() req, @Query() query: any) {
+    await this.requireAdmin(req.user.userId);
+    return this.usersService.listScheduledNotifications(
+      parseInt(query.page) || 1,
+      parseInt(query.limit) || 20,
+    );
   }
 
   @Post('admin/:id/ban')
