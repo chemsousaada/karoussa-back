@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Query, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Query, Param, UseGuards, Request, ForbiddenException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { VehiclesService } from './vehicles.service';
 import { UsersService } from '../users/users.service';
@@ -61,6 +61,14 @@ export class VehiclesController {
   @UseGuards(JwtAuthGuard)
   async deleteVehicle(@Request() req, @Param('id') id: string) {
     return this.vehiclesService.delete(id, req.user.userId);
+  }
+
+  @Put('admin/vehicles/:id/sponsor')
+  @UseGuards(JwtAuthGuard)
+  async adminSponsorVehicle(@Request() req, @Param('id') id: string, @Body() body: { duration: string }) {
+    const caller = await this.usersService.findById(req.user.userId);
+    if (!caller.isAdmin) throw new ForbiddenException('Admin access required');
+    return this.vehiclesService.setSponsor(id, body.duration ?? '1 week');
   }
 
   @Get('sellers/:id')

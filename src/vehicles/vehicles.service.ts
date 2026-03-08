@@ -203,6 +203,24 @@ export class VehiclesService {
     return { viewsCount: vehicle.viewsCount ?? 0 };
   }
 
+  /** Admin: Set sponsorship duration on a vehicle. */
+  async setSponsor(vehicleId: string, durationStr: string): Promise<{ featuredUntil: Date }> {
+    const ms = this.parseDuration(durationStr);
+    const featuredUntil = new Date(Date.now() + ms);
+    await this.vehiclesRepository.update(vehicleId, { featuredUntil });
+    return { featuredUntil };
+  }
+
+  private parseDuration(str: string): number {
+    const parts = str.trim().split(/\s+/);
+    const n = parseInt(parts[0]) || 1;
+    const unit = (parts[1] ?? '').toLowerCase();
+    if (unit.startsWith('day'))   return n * 86_400_000;
+    if (unit.startsWith('week'))  return n * 7 * 86_400_000;
+    if (unit.startsWith('month')) return n * 30 * 86_400_000;
+    return n * 86_400_000; // fallback: days
+  }
+
   /** Step 5: Check for expired sponsorships and notify owners (called by cron). */
   async checkSponsorshipExpiry() {
     const now = new Date();
