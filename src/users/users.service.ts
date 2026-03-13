@@ -55,6 +55,10 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { email } });
   }
 
+  async findAllRentalAgencies() {
+    return this.usersRepository.find({ where: { userType: 'rental_agency' } });
+  }
+
   async findById(id: string) {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
@@ -354,10 +358,12 @@ export class UsersService {
 
     if (notifyMethods.length > 0) {
       const planLabel = request.requestedPlan.charAt(0).toUpperCase() + request.requestedPlan.slice(1).replace('_', ' ');
-      const msg = options.adminNote
-        ? `Your ${planLabel} subscription has been approved for ${finalDuration} month(s). ${options.adminNote}`
+      const note = options.adminNote ?? '';
+      const fallback = note
+        ? `Your ${planLabel} subscription has been approved for ${finalDuration} month(s). ${note}`
         : `Your ${planLabel} subscription has been approved and is now active for ${finalDuration} month(s).`;
-      await this.notifyUser(request.userId, notifyMethods, 'Subscription Approved ✓', msg, '/account/subscriptions');
+      const msg = JSON.stringify({ key: 'notif_sub_approved', params: { plan: planLabel, duration: String(finalDuration), note }, text: fallback });
+      await this.notifyUser(request.userId, notifyMethods, 'notif_sub_approved_subject', msg, '/account/subscriptions');
     }
 
     return this.subRequestsRepository.findOne({ where: { id: requestId } });
@@ -379,10 +385,12 @@ export class UsersService {
 
     if (notifyMethods.length > 0) {
       const planLabel = request.requestedPlan.charAt(0).toUpperCase() + request.requestedPlan.slice(1).replace('_', ' ');
-      const msg = options.adminNote
-        ? `Your subscription request for the ${planLabel} plan has been denied. Reason: ${options.adminNote}`
+      const note = options.adminNote ?? '';
+      const fallback = note
+        ? `Your subscription request for the ${planLabel} plan was not approved. Reason: ${note}`
         : `Your subscription request for the ${planLabel} plan was not approved at this time.`;
-      await this.notifyUser(request.userId, notifyMethods, 'Subscription Request Update', msg, '/account/subscriptions');
+      const msg = JSON.stringify({ key: 'notif_sub_denied', params: { plan: planLabel, note }, text: fallback });
+      await this.notifyUser(request.userId, notifyMethods, 'notif_sub_denied_subject', msg, '/account/subscriptions');
     }
 
     return this.subRequestsRepository.findOne({ where: { id: requestId } });
@@ -477,10 +485,11 @@ export class UsersService {
       this.inquiryMessagesRepository.create({ inquiryId, senderType: 'admin', content }),
     );
     // Notify the user about the new admin reply (Step 3)
+    const snippet = `${content.slice(0, 80)}${content.length > 80 ? '…' : ''}`;
     await this.createNotification(
       inquiry.userId,
-      'New message from support',
-      `Support has replied to your inquiry. "${content.slice(0, 80)}${content.length > 80 ? '…' : ''}"`,
+      'notif_support_reply_subject',
+      JSON.stringify({ key: 'notif_support_reply', params: { snippet }, text: `Support has replied to your inquiry. "${snippet}"` }),
       `/account/support`,
     ).catch(() => {});
     return { message: msg, inquiry: await this.inquiriesRepository.findOne({ where: { id: inquiryId } }) };

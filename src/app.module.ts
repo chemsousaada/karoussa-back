@@ -15,6 +15,7 @@ import { ContactModule } from './contact/contact.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { PlansModule } from './plans/plans.module';
 import { ScheduledTasksModule } from './scheduled-tasks/scheduled-tasks.module';
+import { BookingsModule } from './bookings/bookings.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { ScheduledTasksModule } from './scheduled-tasks/scheduled-tasks.module';
     ConversationsModule,
     PlansModule,
     ScheduledTasksModule,
+    BookingsModule,
   ],
   controllers: [],
   providers: [],

@@ -31,6 +31,7 @@ export class VehiclesService {
       image: v.image,
       images: v.images,
       description: v.description,
+      userId: v.userId,
       seller: {
         id: v.sellerId,
         name: v.sellerName,
@@ -191,10 +192,11 @@ export class VehiclesService {
 
       // Step 4: Notify advert owner when their listing reaches 100 views
       if (prevCount < 100 && vehicle.viewsCount >= 100 && vehicle.userId) {
+        const vehicleTitle = `${vehicle.make} ${vehicle.model} (${vehicle.year})`;
         await this.usersService.createNotification(
           vehicle.userId,
-          'Your advert reached 100 views! 🎉',
-          `Your listing "${vehicle.make} ${vehicle.model} (${vehicle.year})" has just reached 100 views. Great visibility!`,
+          'notif_100_views_subject',
+          JSON.stringify({ key: 'notif_100_views', params: { vehicleTitle }, text: `Your listing "${vehicleTitle}" has just reached 100 views. Great visibility!` }),
           `/vehicle/${vehicle.id}`,
         ).catch(() => {});
       }
@@ -233,10 +235,11 @@ export class VehiclesService {
 
     for (const v of expired) {
       await this.vehiclesRepository.update(v.id, { featuredUntil: null });
+      const vTitle = `${v.make} ${v.model} (${v.year})`;
       await this.usersService.createNotification(
         v.userId,
-        'Sponsorship ended for your advert',
-        `The sponsored promotion for "${v.make} ${v.model} (${v.year})" has ended. Renew it to stay at the top of search results.`,
+        'notif_sponsorship_ended_subject',
+        JSON.stringify({ key: 'notif_sponsorship_ended', params: { vehicleTitle: vTitle }, text: `The sponsored promotion for "${vTitle}" has ended. Renew it to stay at the top of search results.` }),
         `/vehicle/${v.id}`,
       ).catch(() => {});
     }

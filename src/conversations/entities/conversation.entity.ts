@@ -22,6 +22,10 @@ export class Conversation {
   @Column({ nullable: true })
   sellerName: string;
 
+  /** Denormalized buyer display name (set when agency opens chat from booking) */
+  @Column({ nullable: true })
+  buyerName: string;
+
   @Column()
   vehicleId: string;
 
@@ -36,6 +40,10 @@ export class Conversation {
 
   @Column({ default: false })
   sellerDeleted: boolean;
+
+  /** Set to true when a report is filed — blocks both parties from sending further messages */
+  @Column({ default: false })
+  isBlocked: boolean;
 
   @CreateDateColumn()
   createdAt: Date;

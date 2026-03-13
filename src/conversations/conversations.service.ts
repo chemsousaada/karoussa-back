@@ -29,12 +29,16 @@ export class ConversationsService implements OnModuleInit {
   // ── List conversations for a user ──────────────────────────────────────────
 
   async getConversations(userId: string) {
-    const convs = await this.convRepo.find({
-      where: { userId },
-      relations: ['messages', 'reports'],
-      order: { updatedAt: 'DESC' },
-    });
-    return convs.map(c => this.formatConversation(c, userId));
+    // Return conversations where user is the buyer OR the seller (agency)
+    const [asBuyer, asSeller] = await Promise.all([
+      this.convRepo.find({ where: { userId }, relations: ['messages', 'reports'], order: { updatedAt: 'DESC' } }),
+      this.convRepo.find({ where: { sellerId: userId }, relations: ['messages', 'reports'], order: { updatedAt: 'DESC' } }),
+    ]);
+    // Merge and deduplicate, sort by updatedAt desc
+    const seen = new Set<string>();
+    const all = [...asBuyer, ...asSeller].filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+    all.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return all.map(c => this.formatConversation(c, userId));
   }
 
   // ── Get single conversation ────────────────────────────────────────────────
@@ -45,7 +49,7 @@ export class ConversationsService implements OnModuleInit {
       relations: ['messages', 'reports'],
     });
     if (!conv) throw new NotFoundException('Conversation not found');
-    if (conv.userId !== userId) throw new ForbiddenException('Access denied');
+    if (conv.userId !== userId && conv.sellerId !== userId) throw new ForbiddenException('Access denied');
     return this.formatConversation(conv, userId);
   }
 
@@ -69,6 +73,34 @@ export class ConversationsService implements OnModuleInit {
     return conv;
   }
 
+  /** Find or create a conversation for a booking (agency-initiated) */
+  async createOrFindForBooking(
+    buyerId: string,
+    vehicleId: string,
+    sellerId: string,
+    sellerName: string,
+    vehicleTitle: string,
+    vehicleImage: string | null,
+  ) {
+    let conv = await this.convRepo.findOne({ where: { userId: buyerId, vehicleId } });
+    if (!conv) {
+      // Get buyer's name
+      const buyer = await this.userRepo.findOne({ where: { id: buyerId } });
+      const buyerName = buyer?.name || buyer?.email || 'User';
+      conv = this.convRepo.create({
+        userId: buyerId,
+        vehicleId,
+        sellerId,
+        sellerName,
+        buyerName,
+        vehicleTitle,
+        vehicleImage,
+      });
+      await this.convRepo.save(conv);
+    }
+    return conv;
+  }
+
   // ── Send message ───────────────────────────────────────────────────────────
 
   async sendMessage(
@@ -79,11 +111,13 @@ export class ConversationsService implements OnModuleInit {
   ) {
     const conv = await this.convRepo.findOne({ where: { id: conversationId } });
     if (!conv) throw new NotFoundException('Conversation not found');
+    if (conv.isBlocked) throw new ForbiddenException('This conversation has been blocked due to a report');
 
-    // Allow the buyer (conv.userId) or the vehicle owner (vehicle.userId) to send messages
-    const vehicle = await this.vehicleRepo.findOne({ where: { id: conv.vehicleId } });
+    // Allow the buyer (conv.userId), vehicle owner (vehicle.userId), or the stored sellerId to send
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conv.vehicleId);
+    const vehicle = isUuid ? await this.vehicleRepo.findOne({ where: { id: conv.vehicleId } }) : null;
     const isBuyer = conv.userId === senderId;
-    const isSeller = vehicle?.userId === senderId;
+    const isSeller = vehicle?.userId === senderId || conv.sellerId === senderId;
     if (!isBuyer && !isSeller) throw new ForbiddenException('Access denied');
 
     const msg = this.msgRepo.create({
@@ -95,14 +129,14 @@ export class ConversationsService implements OnModuleInit {
     const saved = await this.msgRepo.save(msg);
     await this.convRepo.update(conversationId, { updatedAt: new Date() });
 
-    // Notify the other party (Step 1)
-    const recipientId = isBuyer ? vehicle?.userId : conv.userId;
+    // Notify the other party
+    const recipientId = isBuyer ? (vehicle?.userId ?? conv.sellerId) : conv.userId;
     if (recipientId && recipientId !== senderId) {
       const snippet = text ? `"${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"` : 'Sent an attachment.';
       await this.usersService.createNotification(
         recipientId,
-        'New message received',
-        `New message about ${conv.vehicleTitle}: ${snippet}`,
+        'notif_new_message_subject',
+        JSON.stringify({ key: 'notif_new_message', params: { vehicleTitle: conv.vehicleTitle, snippet }, text: `New message about ${conv.vehicleTitle}: ${snippet}` }),
         `/account/messages/${conv.id}`,
       ).catch(() => {});
     }
@@ -128,9 +162,13 @@ export class ConversationsService implements OnModuleInit {
   // ── Unread count across all conversations ─────────────────────────────────
 
   async getUnreadCount(userId: string) {
-    const convs = await this.convRepo.find({ where: { userId }, select: ['id'] });
+    const [asBuyer, asSeller] = await Promise.all([
+      this.convRepo.find({ where: { userId }, select: ['id'] }),
+      this.convRepo.find({ where: { sellerId: userId }, select: ['id'] }),
+    ]);
+    const convs = [...asBuyer, ...asSeller];
     if (!convs.length) return { count: 0 };
-    const ids = convs.map(c => c.id);
+    const ids = [...new Set(convs.map(c => c.id))];
     const count = await this.msgRepo
       .createQueryBuilder('msg')
       .where('msg.conversationId IN (:...ids)', { ids })
@@ -150,7 +188,7 @@ export class ConversationsService implements OnModuleInit {
   ) {
     const conv = await this.convRepo.findOne({ where: { id: conversationId } });
     if (!conv) throw new NotFoundException('Conversation not found');
-    if (conv.userId !== reporterId) throw new ForbiddenException('Access denied');
+    if (conv.userId !== reporterId && conv.sellerId !== reporterId) throw new ForbiddenException('Access denied');
 
     const existing = await this.reportRepo.findOne({
       where: { conversationId, reporterId },
@@ -159,7 +197,9 @@ export class ConversationsService implements OnModuleInit {
 
     const report = this.reportRepo.create({ conversationId, reporterId, reason, details });
     await this.reportRepo.save(report);
-    return { success: true };
+    // Block the conversation so neither party can send further messages
+    await this.convRepo.update(conversationId, { isBlocked: true });
+    return { success: true, isBlocked: true };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -178,11 +218,13 @@ export class ConversationsService implements OnModuleInit {
       userId: conv.userId,
       sellerId: conv.sellerId,
       sellerName: conv.sellerName ?? 'Seller',
+      buyerName: conv.buyerName ?? null,
       vehicleId: conv.vehicleId,
       vehicleTitle: conv.vehicleTitle,
       vehicleImage: conv.vehicleImage ?? null,
       unreadCount,
       hasReported,
+      isBlocked: conv.isBlocked ?? false,
       lastMessage: lastMsg
         ? { text: lastMsg.text, senderId: lastMsg.senderId, createdAt: lastMsg.createdAt }
         : null,
